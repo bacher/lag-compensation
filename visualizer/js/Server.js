@@ -1,10 +1,16 @@
+const DIRECTION = {
+    NORMAL:   0,
+    RUN_DOWN: 1,
+    RUN_UP:   2
+};
+
 class Server {
 
     constructor() {
         this._canvas = document.createElement('canvas');
 
-        this._canvas.width = WIDTH;
-        this._canvas.height   = HEIGHT;
+        this._canvas.width  = WIDTH;
+        this._canvas.height = HEIGHT;
 
         document.querySelector('.views').appendChild(this._canvas);
 
@@ -19,8 +25,9 @@ class Server {
         }];
 
         this._clientState = {
-            delta:         null,
-            subDelta:      0
+            delta:     null,
+            direction: DIRECTION.NORMAL,
+            step:      0
         };
 
         this._curCommandIndex = -1;
@@ -52,89 +59,34 @@ class Server {
         }
 
         const commandsCount = this._commands.length - this._curCommandIndex - 1;
-        const command = commandsCount ? this._commands[this._curCommandIndex + 1].object : null;
-        const prevCommand = this._commands[this._curCommandIndex].object;
+        let   command       = commandsCount ? this._commands[this._curCommandIndex + 1].object : null;
+        let   prevCommand   = this._curCommandIndex >= 0 ? this._commands[this._curCommandIndex].object : null;
+        let   nextCommand   = commandsCount >= 2 ? this._commands[this._curCommandIndex + 2] : null;
+        const lastCommand   = this._commands.length >= 0 ? this._commands[this._commands.length - 1] : null;
 
-        if (this._clientState.subDelta < 0) {
-            if (commandsCount === 0) {
-                // ТУТ ПОКА ХЗ
-            } else if (commandsCount === 1) {
-                this._clientState.subDelta--;
+        const ppDelta       = this._clientState.delta - (newSnapshot.snapshotId - lastCommand.snapshotId);
 
-                if (this._clientState.subDelta === -5) {
-                    this._clientState.subDelta = 0;
-                    this._clientState.delta++;
+        if (!command) {
+            decreaseStep();
 
-                    // Рендерим обычный кадр
-                    newSnapshot.object.position.x = command.position.x;
-                } else {
-                    // Экстраполяция с коррекцией
-                    if (this._clientState.subDelta === -2) {
-                        const x1 = prevSnapshot.object.position.x + mix(prevCommand.moveDirection.x, command.moveDirection.x, 0.7) * 0.8;
-                        const x2 = command.position.x + command.moveDirection.x * 0.6 * 0.8;
-
-                        newSnapshot.object.position.x = mix(x1, x2, 0.5);
-
-                    } else if (this._clientState.subDelta === -3) {
-                        const x1 = prevSnapshot.object.position.x + mix(prevCommand.moveDirection.x, command.moveDirection.x, 0.5) * 0.8;
-                        const x2 = command.position.x + command.moveDirection.x * 0.4 * 0.8;
-
-                        newSnapshot.object.position.x = mix(x1, x2, 0.5);
-                    } else if (this._clientState.subDelta === -4) {
-                        const x1 = prevSnapshot.object.position.x + mix(prevCommand.moveDirection.x, command.moveDirection.x, 0.3) * 0.8;
-                        const x2 = command.position.x + command.moveDirection.x * 0.4 * 0.8;
-
-                        newSnapshot.object.position.x = mix(x1, x2, 0.5);
-                    }
-                }
-            }
-        } else if (this._clientState.subDelta > 0) {
-
-        } else {
-            if (commandsCount === 0) {
-                this._clientState.subDelta--;
-
-                // Экстраполяция 80%
-                newSnapshot.object.position.x = prevSnapshot.object.position.x + prevSnapshot.object.moveDirection.x * 0.8;
-                newSnapshot.object.position.y = prevSnapshot.object.position.y + prevSnapshot.object.moveDirection.y * 0.8;
-
-            } else if (commandsCount === 1) {
-                // Норма
-
+        } else if (!nextCommand) {
+            if (this._clientState.direction === DIRECTION.RUN_DOWN) {
+                decreaseStep();
+            } else if (this._clientState.direction === DIRECTION.RUN_UP) {
+                increaseStep();
             } else {
-                // -------
+                // Do nothing
             }
+        } else {
+            increaseStep();
         }
 
-
-
-        if (commandsCount === 0) {
-            this._clientState.subDelta--;
+        if (nextCommand) {
+            newSnapshot.object.position.x = mix(command.position.x, nextCommand.position.x, this._clientState.step / 5);
+        } else if (command) {
+            newSnapshot.object.position.x = command.position.x + command.moveDirection.x * (this._clientState.step / 5) * 0.8;
         } else {
-            if (commandsCount > 1) {
-                this._clientState.subDelta++;
-            }
-
-            this._curCommandIndex++;
-
-            const command = this._commands[this._curCommandIndex];
-
-            if (!command) {
-                debugger
-            }
-
-            newSnapshot.object.position.x = command.object.position.x;
-            newSnapshot.object.position.y = command.object.position.y;
-            newSnapshot.object.moveDirection.x = command.object.moveDirection.x;
-            newSnapshot.object.moveDirection.y = command.object.moveDirection.y;
-        }
-
-        if (this._commands.length === 0) {
-
-        } else {
-            if (this._commands.length > 1) {
-                this._clientState.subDelta += 0.2;
-            }
+            newSnapshot.object.position.x = prevSnapshot.object.position.x + lastCommand.moveDirection.x;
         }
 
         this._snapshots.push(newSnapshot);
@@ -142,6 +94,47 @@ class Server {
         this._draw();
 
         connection.sendMessageToClient('snapshot', this._snapshots[this._snapshots.length - 1]);
+
+        function decreaseStep() {
+            this._clientState.direction = DIRECTION.RUN_DOWN;
+
+            if (this._clientState.step === 0) {
+                this._clientState.step = 4;
+                this._clientState.delta++;
+
+                prevCommand = command;
+                command     = nextCommand;
+                nextCommand = commandsCount >= 3 ? this._commands[this._curCommandIndex + 3] : null;
+
+                this._curCommandIndex--;
+
+            } else {
+                this._clientState.step--;
+
+                if (this._clientState.step === 0) {
+                    this._clientState.direction = DIRECTION.NORMAL;
+                }
+            }
+        }
+
+        function increaseStep() {
+            this._clientState.direction = DIRECTION.RUN_UP;
+
+            this._clientState.step++;
+
+            if (this._clientState.step === 4) {
+                this._clientState.step = 0;
+                this._clientState.delta--;
+
+                this._clientState.direction = DIRECTION.NORMAL;
+
+                nextCommand = command;
+                command     = prevCommand;
+                prevCommand = this._curCommandIndex > 0 ? this._commands[this._curCommandIndex - 1].object : null
+
+                this._curCommandIndex++;
+            }
+        }
     }
 
     _draw() {

@@ -68,7 +68,7 @@ class ClientConnection {
     }
 
     _getDelay() {
-        return ONE_WAY_DELAY;
+        return ONE_WAY_DELAY + Math.floor(Math.random() * 200);
     }
 
 }
